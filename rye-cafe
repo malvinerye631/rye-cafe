@@ -1,0 +1,95 @@
+name: Rye's Cafe CI/CD
+
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  id-token: write
+
+env:
+  AWS_REGION: us-east-1
+  ECR_REPOSITORY: rye-cafe-mart
+  ECS_CLUSTER: rye-cafe-cluster
+  ECS_SERVICE: rye-cafe-service
+  CONTAINER_NAME: rye-cafe
+
+jobs:
+
+  build-test-scan:
+
+    name: Build and Security Scan
+    runs-on: ubuntu-latest
+
+    steps:
+
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Test Website
+        run: |
+          test -f index.html
+          test -f menu.html
+          test -f services.html
+          test -f contact.html
+          echo "Website tests passed!"
+
+      - name: Build Docker Image
+        run: |
+          docker build -t $ECR_REPOSITORY:$GITHUB_SHA .
+
+      - name: Trivy Security Scan
+        uses: aquasecurity/trivy-action@master
+        with:
+          image-ref: ${{ env.ECR_REPOSITORY }}:${{ github.sha }}
+          severity: HIGH,CRITICAL
+          exit-code: 1
+
+  deploy:
+
+    name: Deploy to AWS
+    runs-on: ubuntu-latest
+    needs: build-test-scan
+
+    steps:
+
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Configure AWS
+        uses: aws-actions/configure-aws-credentials@v5
+        with:
+          role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Login to Amazon ECR
+        id: login-ecr
+        uses: aws-actions/amazon-ecr-login@v2
+
+      - name: Build and Push Docker Image
+        run: |
+          docker build -t ${{ steps.login-ecr.outputs.registry }}/$ECR_REPOSITORY:$GITHUB_SHA .
+          docker push ${{ steps.login-ecr.outputs.registry }}/$ECR_REPOSITORY:$GITHUB_SHA
+
+      - name: Deploy to ECS
+        run: |
+          aws ecs update-service \
+            --cluster $ECS_CLUSTER \
+            --service $ECS_SERVICE \
+            --force-new-deployment
+
+      - name: Deployment Complete
+        run: |
+          echo "================================"
+          echo "⭐ RYE'S CAFE & MART ⭐"
+          echo "================================"
+          echo "☕ Fresh Ethiopian Coffee"
+          echo "🍽️ Authentic Ethiopian Food"
+          echo "🛒 Ethiopian Grocery Mart"
+          echo "⭐⭐⭐⭐⭐"
+          echo "WE THE BEST EVER!"
+          echo "================================"
+
